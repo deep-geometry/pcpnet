@@ -14,7 +14,7 @@ import torch.utils.data
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter # https://github.com/lanpa/tensorboard-pytorch
 import utils
-from dataset import PointcloudPatchDataset, RandomPointcloudPatchSampler, SequentialShapeRandomPointcloudPatchSampler
+from dataset import SebastianPointcloudPatchDataset, RandomPointcloudPatchSampler, SequentialShapeRandomPointcloudPatchSampler
 from pcpnet import PCPNet, MSPCPNet
 
 def parse_arguments():
@@ -23,7 +23,8 @@ def parse_arguments():
     # naming / file handling
     parser.add_argument('--name', type=str, default='my_single_scale_normal', help='training run name')
     parser.add_argument('--desc', type=str, default='My training run for single-scale normal estimation.', help='description')
-    parser.add_argument('--indir', type=str, default='./pclouds', help='input folder (point clouds)')
+    parser.add_argument('--traindir', type=str, default='./pclouds', help='input folder (point clouds)')
+    parser.add_argument('--testdir', type=str, default='./pclouds', help='input folder (point clouds)')
     parser.add_argument('--outdir', type=str, default='./models', help='output folder (trained models)')
     parser.add_argument('--logdir', type=str, default='./logs', help='training log folder')
     parser.add_argument('--trainset', type=str, default='trainingset_whitenoise.txt', help='training set file name')
@@ -149,8 +150,8 @@ def train_pcpnet(opt):
     torch.manual_seed(opt.seed)
 
     # create train and test dataset loaders
-    train_dataset = PointcloudPatchDataset(
-        root=opt.indir,
+    train_dataset = SebastianPointcloudPatchDataset(
+        root=opt.traindir,
         shape_list_filename=opt.trainset,
         patch_radius=opt.patch_radius,
         points_per_patch=opt.points_per_patch,
@@ -183,8 +184,8 @@ def train_pcpnet(opt):
         batch_size=opt.batchSize,
         num_workers=int(opt.workers))
 
-    test_dataset = PointcloudPatchDataset(
-        root=opt.indir,
+    test_dataset = SebastianPointcloudPatchDataset(
+        root=opt.testdir,
         shape_list_filename=opt.testset,
         patch_radius=opt.patch_radius,
         points_per_patch=opt.points_per_patch,
