@@ -569,7 +569,6 @@ class SebastianPointcloudPatchDataset(data.Dataset):
             # normalize size of patch (scale with 1 / patch radius)
             patch_pts[start:end, :] = patch_pts[start:end, :] / rad
 
-
         if self.include_normals:
             patch_normal = torch.from_numpy(shape.normals[center_point_ind, :]).float()
 
@@ -664,3 +663,140 @@ class SebastianPointcloudPatchDataset(data.Dataset):
         curv_filename = os.path.join(self.root, self.shape_names[shape_ind]+'.curv') if self.include_curvatures else None
         pidx_filename = os.path.join(self.root, self.shape_names[shape_ind]+'.pidx') if self.sparse_patches else None
         return load_shape(point_filename, normals_filename, curv_filename, pidx_filename)
+
+
+class SebastianPatchDataset(data.Dataset):
+    # patch radius as fraction of the bounding box diagonal of a shape
+    def __init__(self, root, shape_list_filename, patch_radius, points_per_patch, patch_features,
+                 seed=None, identical_epochs=False, use_pca=True, center='point',
+                 point_tuple=1, cache_capacity=1, point_count_std=0.0, sparse_patches=False):
+
+        # initialize parameters
+        self.root = root
+        self.shape_list_filename = shape_list_filename
+        self.patch_features = patch_features
+        self.patch_radius = patch_radius
+        self.points_per_patch = points_per_patch
+        self.identical_epochs = identical_epochs
+        self.use_pca = use_pca
+        self.sparse_patches = sparse_patches
+        self.center = center
+        self.point_tuple = point_tuple
+        self.point_count_std = point_count_std
+        self.seed = seed
+
+        self.include_normals = False
+        self.include_curvatures = False
+        for pfeat in self.patch_features:
+            if pfeat == 'normal':
+                self.include_normals = True
+            elif pfeat == 'max_curvature' or pfeat == 'min_curvature':
+                raise ValueError("Sebastian does not support curvatures")
+            else:
+                raise ValueError('Unknown patch feature: %s' % (pfeat))
+
+        # self.loaded_shape = None
+        self.load_iteration = 0
+
+        # get all shape names in the dataset
+        self.shape_names = []
+        for p in os.listdir(self.root):
+            if not p.endswith(".npy"):
+                self.shape_names.append(p)
+
+        # initialize rng for picking points in a patch
+        if self.seed is None:
+            self.seed = np.random.random_integers(0, 2**32-1, 1)[0]
+        self.rng = np.random.RandomState(self.seed)
+
+        # get basic information for each shape in the dataset
+        self.shape_patch_count = []
+        self.patch_radius_absolute = []
+
+        self.shapes = []
+        for shape_ind, shape_name in enumerate(self.shape_names):
+            print('getting information for shape %s' % (shape_name))
+
+            # load from text file and save in more efficient numpy format
+            point_filename = os.path.join(self.root, shape_name)
+            v, _, n = psu.read_obj(point_filename)
+            pts = v
+            kdtree = spatial.KDTree(pts)
+            centroid = np.mean(pts, axis=0)
+            _, i = kdtree.query(centroid)
+            center_vertex = pts[i, :]
+            pts -= center_vertex
+            shape = {'p': torch.FloatTensor(pts), 'n': torch.FloatTensor(n),
+                     'ctr': torch.FloatTensor(center_vertex), 'ctr_i': i}
+            self.shapes.append(shape)
+
+    # returns a patch centered at the point with the given global index
+    # and the ground truth normal the the patch center
+    def __getitem__(self, index):
+        shape = self.shapes[index]
+        patch_pts, patch_normals, ctr, ctr_i = shape['p'], shape['n'], shape['ctr'], shape['ctr_i']
+        patch_normal = patch_normals[ctr_i, :]
+
+        if self.use_pca:
+            # compute pca of points in the patch:
+            # center the patch around the mean:
+            pts_mean = patch_pts.mean(0)
+            patch_pts = patch_pts - pts_mean
+
+            trans, _, _ = torch.svd(torch.t(patch_pts))
+            patch_pts = torch.mm(patch_pts, trans)
+
+            cp_new = -pts_mean # since the patch was originally centered, the original cp was at (0,0,0)
+            cp_new = torch.matmul(cp_new, trans)
+
+            # re-center on original center point
+            patch_pts = patch_pts - cp_new
+
+            if self.include_normals:
+                patch_normal = torch.matmul(patch_normal, trans)
+
+        else:
+            trans = torch.eye(3).float()
+
+        # # get point tuples from the current patch
+        # if self.point_tuple > 1:
+        #     patch_tuples = torch.FloatTensor(
+        #         self.points_per_patch*len(self.patch_radius_absolute[shape_ind]), 3*self.point_tuple).zero_()
+        #     for s, rad in enumerate(self.patch_radius_absolute[shape_ind]):
+        #         start = scale_ind_range[s, 0]
+        #         end = scale_ind_range[s, 1]
+        #         point_count = end - start
+        #
+        #         tuple_count = point_count**self.point_tuple
+        #
+        #         # get linear indices of the tuples
+        #         if tuple_count > self.points_per_patch:
+        #             patch_tuple_inds = self.rng.choice(tuple_count, self.points_per_patch, replace=False)
+        #             tuple_count = self.points_per_patch
+        #         else:
+        #             patch_tuple_inds = np.arange(tuple_count)
+        #
+        #         # linear tuple index to index for each tuple element
+        #         patch_tuple_inds = np.unravel_index(patch_tuple_inds, (point_count,)*self.point_tuple)
+        #
+        #         for t in range(self.point_tuple):
+        #             patch_tuples[start:start+tuple_count, t*3:(t+1)*3] = patch_pts[start+patch_tuple_inds[t], :]
+        #
+        #
+        #     patch_pts = patch_tuples
+
+        patch_feats = ()
+        for pfeat in self.patch_features:
+            if pfeat == 'normal':
+                patch_feats = patch_feats + (patch_normal,)
+            elif pfeat == 'max_curvature':
+                raise ValueError("Sebastian does not support curvatures")
+            elif pfeat == 'min_curvature':
+                raise ValueError("Sebastian does not support curvatures")
+            else:
+                raise ValueError('Unknown patch feature: %s' % (pfeat))
+
+        return (patch_pts.float(),) + patch_feats + (trans.float(),)
+
+    def __len__(self):
+        return len(self.shapes)

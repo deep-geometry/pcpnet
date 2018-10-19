@@ -14,8 +14,10 @@ import torch.utils.data
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter # https://github.com/lanpa/tensorboard-pytorch
 import utils
-from dataset import SebastianPointcloudPatchDataset, RandomPointcloudPatchSampler, SequentialShapeRandomPointcloudPatchSampler
+from dataset import SebastianPatchDataset, RandomPointcloudPatchSampler, SequentialShapeRandomPointcloudPatchSampler
 from pcpnet import PCPNet, MSPCPNet
+import json
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -35,23 +37,26 @@ def parse_arguments():
     # training parameters
     parser.add_argument('--nepoch', type=int, default=2000, help='number of epochs to train for')
     parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
+
+    # unused
     parser.add_argument('--patch_radius', type=float, default=[0.05], nargs='+', help='patch radius in multiples of the shape\'s bounding box diagonal, multiple values for multi-scale.')
     parser.add_argument('--patch_center', type=str, default='point', help='center patch at...\n'
                         'point: center point\n'
                         'mean: patch mean')
     parser.add_argument('--patch_point_count_std', type=float, default=0, help='standard deviation of the number of points in a patch')
     parser.add_argument('--patches_per_shape', type=int, default=1000, help='number of patches sampled from each shape in an epoch')
-    parser.add_argument('--workers', type=int, default=1, help='number of data loading workers - 0 means same thread as main execution')
     parser.add_argument('--cache_capacity', type=int, default=100, help='Max. number of dataset elements (usually shapes) to hold in the cache at the same time.')
-    parser.add_argument('--seed', type=int, default=3627473, help='manual seed')
+    parser.add_argument('--identical_epochs', type=int, default=False, help='use same patches in each epoch, mainly for debugging')
+
     parser.add_argument('--training_order', type=str, default='random', help='order in which the training patches are presented:\n'
                         'random: fully random over the entire dataset (the set of all patches is permuted)\n'
                         'random_shape_consecutive: random over the entire dataset, but patches of a shape remain consecutive (shapes and patches inside a shape are permuted)')
-    parser.add_argument('--identical_epochs', type=int, default=False, help='use same patches in each epoch, mainly for debugging')
-    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
+    parser.add_argument('--workers', type=int, default=1, help='number of data loading workers - 0 means same thread as main execution')
+    parser.add_argument('--seed', type=int, default=3627473, help='manual seed')
+    parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, help='gradient descent momentum')
     parser.add_argument('--use_pca', type=int, default=False, help='Give both inputs and ground truth in local PCA coordinate frame')
-    parser.add_argument('--normal_loss', type=str, default='ms_euclidean', help='Normal loss type:\n'
+    parser.add_argument('--normal_loss', type=str, default='ms_oneminuscos', help='Normal loss type:\n'
                         'ms_euclidean: mean square euclidean distance\n'
                         'ms_oneminuscos: mean square 1-cos(angle error)')
 
@@ -69,6 +74,7 @@ def parse_arguments():
 
     return parser.parse_args()
 
+
 def train_pcpnet(opt):
 
     # colored console output
@@ -79,6 +85,9 @@ def train_pcpnet(opt):
     params_filename = os.path.join(opt.outdir, '%s_params.pth' % (opt.name))
     model_filename = os.path.join(opt.outdir, '%s_model.pth' % (opt.name))
     desc_filename = os.path.join(opt.outdir, '%s_description.txt' % (opt.name))
+    params_json_filename = os.path.join(opt.outdir, "%s_params.json" % opt.name)
+    with open(params_json_filename, 'w') as f:
+        json.dump(vars(opt), f)
 
     if os.path.exists(log_dirname) or os.path.exists(model_filename):
         response = input('A training run named "%s" already exists, overwrite? (y/n) ' % (opt.name))
@@ -138,6 +147,7 @@ def train_pcpnet(opt):
             use_feat_stn=opt.use_feat_stn,
             sym_op=opt.sym_op,
             point_tuple=opt.point_tuple)
+        raise ValueError("Sebastian does not support MSPCPNet")
 
     if opt.refine != '':
         pcpnet.load_state_dict(torch.load(opt.refine))
@@ -150,7 +160,7 @@ def train_pcpnet(opt):
     torch.manual_seed(opt.seed)
 
     # create train and test dataset loaders
-    train_dataset = SebastianPointcloudPatchDataset(
+    train_dataset = SebastianPatchDataset(
         root=opt.traindir,
         shape_list_filename=opt.trainset,
         patch_radius=opt.patch_radius,
@@ -163,28 +173,33 @@ def train_pcpnet(opt):
         center=opt.patch_center,
         point_tuple=opt.point_tuple,
         cache_capacity=opt.cache_capacity)
+
+    shuffle = False
     if opt.training_order == 'random':
-        train_datasampler = RandomPointcloudPatchSampler(
-            train_dataset,
-            patches_per_shape=opt.patches_per_shape,
-            seed=opt.seed,
-            identical_epochs=opt.identical_epochs)
+        shuffle = True
+        # train_datasampler = RandomPointcloudPatchSampler(
+        #     train_dataset,
+        #     patches_per_shape=opt.patches_per_shape,
+        #     seed=opt.seed,
+        #     identical_epochs=opt.identical_epochs)
     elif opt.training_order == 'random_shape_consecutive':
-        train_datasampler = SequentialShapeRandomPointcloudPatchSampler(
-            train_dataset,
-            patches_per_shape=opt.patches_per_shape,
-            seed=opt.seed,
-            identical_epochs=opt.identical_epochs)
+        shuffle = False
+        # train_datasampler = SequentialShapeRandomPointcloudPatchSampler(
+        #     train_dataset,
+        #     patches_per_shape=opt.patches_per_shape,
+        #     seed=opt.seed,
+        #     identical_epochs=opt.identical_epochs)
     else:
         raise ValueError('Unknown training order: %s' % (opt.training_order))
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
-        sampler=train_datasampler,
+        shuffle=shuffle,
+        # sampler=train_datasampler,
         batch_size=opt.batchSize,
         num_workers=int(opt.workers))
 
-    test_dataset = SebastianPointcloudPatchDataset(
+    test_dataset = SebastianPatchDataset(
         root=opt.testdir,
         shape_list_filename=opt.testset,
         patch_radius=opt.patch_radius,
@@ -197,24 +212,29 @@ def train_pcpnet(opt):
         center=opt.patch_center,
         point_tuple=opt.point_tuple,
         cache_capacity=opt.cache_capacity)
+
+    shuffle = False
     if opt.training_order == 'random':
-        test_datasampler = RandomPointcloudPatchSampler(
-            test_dataset,
-            patches_per_shape=opt.patches_per_shape,
-            seed=opt.seed,
-            identical_epochs=opt.identical_epochs)
+        shuffle = True
+        # test_datasampler = RandomPointcloudPatchSampler(
+        #     test_dataset,
+        #     patches_per_shape=opt.patches_per_shape,
+        #     seed=opt.seed,
+        #     identical_epochs=opt.identical_epochs)
     elif opt.training_order == 'random_shape_consecutive':
-        test_datasampler = SequentialShapeRandomPointcloudPatchSampler(
-            test_dataset,
-            patches_per_shape=opt.patches_per_shape,
-            seed=opt.seed,
-            identical_epochs=opt.identical_epochs)
+        shuffle = False
+        # test_datasampler = SequentialShapeRandomPointcloudPatchSampler(
+        #     test_dataset,
+        #     patches_per_shape=opt.patches_per_shape,
+        #     seed=opt.seed,
+        #     identical_epochs=opt.identical_epochs)
     else:
         raise ValueError('Unknown training order: %s' % (opt.training_order))
 
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset,
-        sampler=test_datasampler,
+        shuffle=shuffle,
+        # sampler=test_datasampler,
         batch_size=opt.batchSize,
         num_workers=int(opt.workers))
 
@@ -223,7 +243,7 @@ def train_pcpnet(opt):
     opt.test_shapes = test_dataset.shape_names
 
     print('training set: %d patches (in %d batches) - test set: %d patches (in %d batches)' %
-          (len(train_datasampler), len(train_dataloader), len(test_datasampler), len(test_dataloader)))
+          (len(train_dataset), len(train_dataloader), len(train_dataset), len(test_dataloader)))
 
     try:
         os.makedirs(opt.outdir)
@@ -396,6 +416,7 @@ def compute_loss(pred, target, outputs, output_pred_ind, output_target_ind, outp
             raise ValueError('Unsupported output type: %s' % (o))
 
     return loss
+
 
 if __name__ == '__main__':
     train_opt = parse_arguments()
