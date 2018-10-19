@@ -38,16 +38,6 @@ def parse_arguments():
     parser.add_argument('--nepoch', type=int, default=2000, help='number of epochs to train for')
     parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
 
-    # unused
-    parser.add_argument('--patch_radius', type=float, default=[0.05], nargs='+', help='patch radius in multiples of the shape\'s bounding box diagonal, multiple values for multi-scale.')
-    parser.add_argument('--patch_center', type=str, default='point', help='center patch at...\n'
-                        'point: center point\n'
-                        'mean: patch mean')
-    parser.add_argument('--patch_point_count_std', type=float, default=0, help='standard deviation of the number of points in a patch')
-    parser.add_argument('--patches_per_shape', type=int, default=1, help='number of patches sampled from each shape in an epoch')
-    parser.add_argument('--cache_capacity', type=int, default=100, help='Max. number of dataset elements (usually shapes) to hold in the cache at the same time.')
-    parser.add_argument('--identical_epochs', type=int, default=False, help='use same patches in each epoch, mainly for debugging')
-
     parser.add_argument('--training_order', type=str, default='random', help='order in which the training patches are presented:\n'
                         'random: fully random over the entire dataset (the set of all patches is permuted)\n'
                         'random_shape_consecutive: random over the entire dataset, but patches of a shape remain consecutive (shapes and patches inside a shape are permuted)')
@@ -60,6 +50,18 @@ def parse_arguments():
                         'ms_euclidean: mean square euclidean distance\n'
                         'ms_oneminuscos: mean square 1-cos(angle error)')
 
+    # unused
+    parser.add_argument('--patch_radius', type=float, default=[0.05], nargs='+', help='patch radius in multiples of the shape\'s bounding box diagonal, multiple values for multi-scale.')
+    parser.add_argument('--patch_center', type=str, default='point', help='center patch at...\n'
+                        'point: center point\n'
+                        'mean: patch mean')
+    parser.add_argument('--patch_point_count_std', type=float, default=0, help='standard deviation of the number of points in a patch')
+    parser.add_argument('--patches_per_shape', type=int, default=1, help='number of patches sampled from each shape in an epoch')
+    parser.add_argument('--cache_capacity', type=int, default=100, help='Max. number of dataset elements (usually shapes) to hold in the cache at the same time.')
+    parser.add_argument('--identical_epochs', type=int, default=False, help='use same patches in each epoch, mainly for debugging')
+
+    
+    
     # model hyperparameters
     parser.add_argument('--outputs', type=str, nargs='+', default=['unoriented_normals'], help='outputs of the network, a list with elements of:\n'
                         'unoriented_normals: unoriented (flip-invariant) point normals\n'
@@ -72,11 +74,16 @@ def parse_arguments():
     parser.add_argument('--point_tuple', type=int, default=1, help='use n-tuples of points as input instead of single points')
     parser.add_argument('--points_per_patch', type=int, default=500, help='max. number of points per patch')
 
+
+    parser.add_argument('--cuda-device-id', type=int, default=0, help='which cuda device to use')
     return parser.parse_args()
 
 
 def train_pcpnet(opt):
-
+    print("setting cuda device id to %d" % (opt.cuda_device_id))
+    torch.cuda.set_device(opt.cuda_device_id)
+    print("torch.cuda.device is %d" % torch.cuda.current_device())
+    
     # colored console output
     green = lambda x: '\033[92m' + x + '\033[0m'
     blue = lambda x: '\033[94m' + x + '\033[0m'
@@ -420,4 +427,5 @@ def compute_loss(pred, target, outputs, output_pred_ind, output_target_ind, outp
 
 if __name__ == '__main__':
     train_opt = parse_arguments()
+    print("setting cuda device id to %d" % (train_opt.cuda_device_id))
     train_pcpnet(train_opt)
