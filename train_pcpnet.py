@@ -44,7 +44,7 @@ def parse_arguments():
                         'point: center point\n'
                         'mean: patch mean')
     parser.add_argument('--patch_point_count_std', type=float, default=0, help='standard deviation of the number of points in a patch')
-    parser.add_argument('--patches_per_shape', type=int, default=1000, help='number of patches sampled from each shape in an epoch')
+    parser.add_argument('--patches_per_shape', type=int, default=1, help='number of patches sampled from each shape in an epoch')
     parser.add_argument('--cache_capacity', type=int, default=100, help='Max. number of dataset elements (usually shapes) to hold in the cache at the same time.')
     parser.add_argument('--identical_epochs', type=int, default=False, help='use same patches in each epoch, mainly for debugging')
 
