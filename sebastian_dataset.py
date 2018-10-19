@@ -53,14 +53,17 @@ def plot_dataset():
                                         patch_radius=-1,
                                         points_per_patch=1,
                                         patch_features=['normal'])
-    pmt = np.random.permutation(len(dataset_pca))
+    # pmt = np.random.permutation(len(dataset_pca))
+    pmt = list(range(len(dataset_pca)))
     for i in pmt:
         with_pca = dataset_pca[i]
         # without_pca = dataset_no_pca[i]
 
         v1, n1, trans1 = with_pca
-        mlab.points3d(v1[:, 0], v1[:, 1], v1[:, 2], scale_factor=0.001, color=(0.2, 0.2, 0.8))
-        mlab.quiver3d([0], [0], [0], n1[0], n1[1], n1[2], color=(0.2, 0.2, 0.8))
+        print("normal norm =", np.linalg.norm(n1.numpy()))
+        mlab.points3d(v1[:, 0], v1[:, 1], v1[:, 2], scale_factor=0.01, color=(0.2, 0.2, 0.8))
+        mlab.points3d([0], [0], [0], scale_factor=0.015, color=(0.2, 0.8, 0.2))
+        mlab.quiver3d([0], [0], [0], n1[0], n1[1], n1[2], scale_factor=0.2, color=(0.2, 0.2, 0.8))
 
         # v2, n2, trans2 = without_pca
         # mlab.points3d(v2[:, 0], v2[:, 1], v2[:, 2], scale_factor=0.001, color=(0.8, 0.2, 0.2))

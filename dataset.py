@@ -668,7 +668,7 @@ class SebastianPointcloudPatchDataset(data.Dataset):
 class SebastianPatchDataset(data.Dataset):
     # patch radius as fraction of the bounding box diagonal of a shape
     def __init__(self, root, shape_list_filename, patch_radius, points_per_patch, patch_features,
-                 seed=None, identical_epochs=False, use_pca=True, center='point',
+                 seed=None, identical_epochs=False, use_pca=True, normalize_data=True, center='point',
                  point_tuple=1, cache_capacity=1, point_count_std=0.0, sparse_patches=False):
 
         # initialize parameters
@@ -684,6 +684,7 @@ class SebastianPatchDataset(data.Dataset):
         self.point_tuple = point_tuple
         self.point_count_std = point_count_std
         self.seed = seed
+        self.normalize_data = normalize_data
 
         self.include_normals = False
         self.include_curvatures = False
@@ -721,13 +722,25 @@ class SebastianPatchDataset(data.Dataset):
             point_filename = os.path.join(self.root, shape_name)
             v, _, n = psu.read_obj(point_filename)
             pts = v
+
+            scale_factor = 1.0
+            min_translate_factor = np.zeros(3)
+
+            if self.normalize_data:
+                min_translate_factor = np.min(pts, axis=0)
+                pts -= min_translate_factor
+                scale_factor = 1.0 / np.max(pts)
+                pts *= scale_factor
+
             kdtree = spatial.KDTree(pts)
             centroid = np.mean(pts, axis=0)
             _, i = kdtree.query(centroid)
             center_vertex = pts[i, :]
             pts -= center_vertex
             shape = {'p': torch.FloatTensor(pts), 'n': torch.FloatTensor(n),
-                     'ctr': torch.FloatTensor(center_vertex), 'ctr_i': i}
+                     'ctr': torch.FloatTensor(center_vertex), 'ctr_i': i,
+                     'scale_factor': scale_factor,
+                     'min_translate_factor': min_translate_factor }
             self.shapes.append(shape)
 
     # returns a patch centered at the point with the given global index
@@ -800,3 +813,13 @@ class SebastianPatchDataset(data.Dataset):
 
     def __len__(self):
         return len(self.shapes)
+
+    @staticmethod
+    def patch_scale_factor(v):
+        vnp = v.numpy()
+        max_v = np.max(vnp, axis=0)
+        min_v = np.min(vnp, axis=0)
+        extent_v = max_v - min_v
+        extent_v[np.argwhere(np.abs(extent_v)<1e-3)] = 1.0
+        return torch.from_numpy(extent_v.astype(np.float32))
+
