@@ -7,7 +7,7 @@ import torch.utils.data as data
 import numpy as np
 import scipy.spatial as spatial
 
-import point_upsampling_utils as psu
+import point_sampling_utils as psu
 
 
 # do NOT modify the returned points! kdtree uses a reference, not a copy of these points,
