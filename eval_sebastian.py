@@ -75,7 +75,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def train_pcpnet(opt):
+def eval_pcpnet(opt):
 
     # colored console output
     green = lambda x: '\033[92m' + x + '\033[0m'
@@ -86,16 +86,16 @@ def train_pcpnet(opt):
     model_filename = os.path.join(opt.outdir, '%s_model.pth' % (opt.name))
     desc_filename = os.path.join(opt.outdir, '%s_description.txt' % (opt.name))
     params_json_filename = os.path.join(opt.outdir, "%s_params.json" % opt.name)
-    with open(params_json_filename, 'w') as f:
-        json.dump(vars(opt), f)
+    # with open(params_json_filename, 'w') as f:
+    #     json.dump(vars(opt), f)
 
-    if os.path.exists(log_dirname) or os.path.exists(model_filename):
-        response = input('A training run named "%s" already exists, overwrite? (y/n) ' % (opt.name))
-        if response == 'y':
-            if os.path.exists(log_dirname):
-                shutil.rmtree(os.path.join(opt.logdir, opt.name))
-        else:
-            sys.exit()
+    # if os.path.exists(log_dirname) or os.path.exists(model_filename):
+    #     response = input('A training run named "%s" already exists, overwrite? (y/n) ' % (opt.name))
+    #     if response == 'y':
+    #         if os.path.exists(log_dirname):
+    #             shutil.rmtree(os.path.join(opt.logdir, opt.name))
+    #     else:
+    #         sys.exit()
 
     # get indices in targets and predictions corresponding to each output
     target_features = []
@@ -149,8 +149,10 @@ def train_pcpnet(opt):
             point_tuple=opt.point_tuple)
         raise ValueError("Sebastian does not support MSPCPNet")
 
-    if opt.refine != '':
+    if os.path.exists(log_dirname) or os.path.exists(model_filename):
         pcpnet.load_state_dict(torch.load(opt.refine))
+    else:
+        raise ValueError("No Model to load")
 
     if opt.seed < 0:
         opt.seed = random.randint(1, 10000)
@@ -177,18 +179,8 @@ def train_pcpnet(opt):
     shuffle = False
     if opt.training_order == 'random':
         shuffle = True
-        # train_datasampler = RandomPointcloudPatchSampler(
-        #     train_dataset,
-        #     patches_per_shape=opt.patches_per_shape,
-        #     seed=opt.seed,
-        #     identical_epochs=opt.identical_epochs)
     elif opt.training_order == 'random_shape_consecutive':
         shuffle = False
-        # train_datasampler = SequentialShapeRandomPointcloudPatchSampler(
-        #     train_dataset,
-        #     patches_per_shape=opt.patches_per_shape,
-        #     seed=opt.seed,
-        #     identical_epochs=opt.identical_epochs)
     else:
         raise ValueError('Unknown training order: %s' % (opt.training_order))
 
@@ -216,18 +208,8 @@ def train_pcpnet(opt):
     shuffle = False
     if opt.training_order == 'random':
         shuffle = True
-        # test_datasampler = RandomPointcloudPatchSampler(
-        #     test_dataset,
-        #     patches_per_shape=opt.patches_per_shape,
-        #     seed=opt.seed,
-        #     identical_epochs=opt.identical_epochs)
     elif opt.training_order == 'random_shape_consecutive':
         shuffle = False
-        # test_datasampler = SequentialShapeRandomPointcloudPatchSampler(
-        #     test_dataset,
-        #     patches_per_shape=opt.patches_per_shape,
-        #     seed=opt.seed,
-        #     identical_epochs=opt.identical_epochs)
     else:
         raise ValueError('Unknown training order: %s' % (opt.training_order))
 
@@ -250,32 +232,10 @@ def train_pcpnet(opt):
     except OSError:
         pass
 
-
-    train_writer = SummaryWriter(os.path.join(log_dirname, 'train'))
-    test_writer = SummaryWriter(os.path.join(log_dirname, 'test'))
-
     optimizer = optim.SGD(pcpnet.parameters(), lr=opt.lr, momentum=opt.momentum)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[], gamma=0.1) # milestones in number of optimizer iterations
     pcpnet.cuda()
 
-    train_num_batch = len(train_dataloader)
-    test_num_batch = len(test_dataloader)
-
-    # save parameters
-    torch.save(opt, params_filename)
-
-    # save description
-    with open(desc_filename, 'w+') as text_file:
-        print(opt.desc, file=text_file)
-
-
-    train_batchind = -1
-    train_fraction_done = 0.0
     train_enum = enumerate(train_dataloader, 0)
-
-    test_batchind = -1
-    test_fraction_done = 0.0
-    test_enum = enumerate(test_dataloader, 0)
 
     for train_batchind, data in train_enum:
 
@@ -360,4 +320,4 @@ def compute_loss(pred, target, outputs, output_pred_ind, output_target_ind, outp
 
 if __name__ == '__main__':
     train_opt = parse_arguments()
-    train_pcpnet(train_opt)
+    eval_pcpnet(train_opt)
