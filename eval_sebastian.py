@@ -307,6 +307,8 @@ def train_pcpnet(opt):
             patch_rot=trans if opt.use_point_stn else None,
             normal_loss=opt.normal_loss)
 
+        print(loss)
+
 
 def compute_loss(pred, target, outputs, output_pred_ind, output_target_ind, output_loss_weight, patch_rot, normal_loss):
 
