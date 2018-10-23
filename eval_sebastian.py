@@ -150,7 +150,7 @@ def eval_pcpnet(opt):
         raise ValueError("Sebastian does not support MSPCPNet")
 
     if os.path.exists(log_dirname) or os.path.exists(model_filename):
-        pcpnet.load_state_dict(torch.load(os.path.join(log_dirname, model_filename)))
+        pcpnet.load_state_dict(torch.load(model_filename))
     else:
         raise ValueError("No Model to load")
 
