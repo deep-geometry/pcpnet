@@ -86,25 +86,15 @@ def eval_pcpnet(opt):
     model_filename = os.path.join(opt.outdir, '%s_model.pth' % (opt.name))
     desc_filename = os.path.join(opt.outdir, '%s_description.txt' % (opt.name))
     params_json_filename = os.path.join(opt.outdir, "%s_params.json" % opt.name)
-    # with open(params_json_filename, 'w') as f:
-    #     json.dump(vars(opt), f)
-
-    # if os.path.exists(log_dirname) or os.path.exists(model_filename):
-    #     response = input('A training run named "%s" already exists, overwrite? (y/n) ' % (opt.name))
-    #     if response == 'y':
-    #         if os.path.exists(log_dirname):
-    #             shutil.rmtree(os.path.join(opt.logdir, opt.name))
-    #     else:
-    #         sys.exit()
-
-    # get indices in targets and predictions corresponding to each output
+    losses_filename = os.path.join(opt.outdir, "%s_losses.pth" % opt.name)
+    
     target_features = []
     output_target_ind = []
     output_pred_ind = []
     output_loss_weight = []
     pred_dim = 0
     for o in opt.outputs:
-        if o == 'unoriented_normals' or o == 'oriented_normals':
+        if o == 'oriented_normals':
             if 'normal' not in target_features:
                 target_features.append('normal')
 
@@ -112,17 +102,6 @@ def eval_pcpnet(opt):
             output_pred_ind.append(pred_dim)
             output_loss_weight.append(1.0)
             pred_dim += 3
-        elif o == 'max_curvature' or o == 'min_curvature':
-            if o not in target_features:
-                target_features.append(o)
-
-            output_target_ind.append(target_features.index(o))
-            output_pred_ind.append(pred_dim)
-            if o == 'max_curvature':
-                output_loss_weight.append(0.7)
-            else:
-                output_loss_weight.append(0.3)
-            pred_dim += 1
         else:
             raise ValueError('Unknown output: %s' % (o))
 
@@ -191,52 +170,22 @@ def eval_pcpnet(opt):
         batch_size=opt.batchSize,
         num_workers=int(opt.workers))
 
-    test_dataset = SebastianPatchDataset(
-        root=opt.testdir,
-        shape_list_filename=opt.testset,
-        patch_radius=opt.patch_radius,
-        points_per_patch=opt.points_per_patch,
-        patch_features=target_features,
-        point_count_std=opt.patch_point_count_std,
-        seed=opt.seed,
-        identical_epochs=opt.identical_epochs,
-        use_pca=opt.use_pca,
-        center=opt.patch_center,
-        point_tuple=opt.point_tuple,
-        cache_capacity=opt.cache_capacity)
-
-    shuffle = False
-    if opt.training_order == 'random':
-        shuffle = True
-    elif opt.training_order == 'random_shape_consecutive':
-        shuffle = False
-    else:
-        raise ValueError('Unknown training order: %s' % (opt.training_order))
-
-    test_dataloader = torch.utils.data.DataLoader(
-        test_dataset,
-        shuffle=shuffle,
-        # sampler=test_datasampler,
-        batch_size=opt.batchSize,
-        num_workers=int(opt.workers))
-
     # keep the exact training shape names for later reference
     opt.train_shapes = train_dataset.shape_names
-    opt.test_shapes = test_dataset.shape_names
 
-    print('training set: %d patches (in %d batches) - test set: %d patches (in %d batches)' %
-          (len(train_dataset), len(train_dataloader), len(train_dataset), len(test_dataloader)))
+    print('evaluation dataset: %d patches (in %d batches)' %
+          (len(train_dataset), len(train_dataloader)))
 
     try:
         os.makedirs(opt.outdir)
     except OSError:
         pass
 
-    optimizer = optim.SGD(pcpnet.parameters(), lr=opt.lr, momentum=opt.momentum)
     pcpnet.cuda()
 
     train_enum = enumerate(train_dataloader, 0)
 
+    losses = []
     for train_batchind, data in train_enum:
 
         # set to evaluation mode
@@ -258,7 +207,7 @@ def eval_pcpnet(opt):
         # forward pass
         pred, trans, _, _ = pcpnet(points)
 
-        loss = compute_loss(
+        l = compute_loss(
             pred=pred, target=target,
             outputs=opt.outputs,
             output_pred_ind=output_pred_ind,
@@ -266,19 +215,20 @@ def eval_pcpnet(opt):
             output_loss_weight=output_loss_weight,
             patch_rot=trans if opt.use_point_stn else None,
             normal_loss=opt.normal_loss)
-
-        print(loss)
-
+        l = [li.data for li in l]
+        l = torch.cat(l)
+        losses.extend(list(l.cpu().numpy()))
+        print("batch_mean_loss =", l.mean()) 
+    torch.save(losses, losses_filename)
+        
 
 def compute_loss(pred, target, outputs, output_pred_ind, output_target_ind, output_loss_weight, patch_rot, normal_loss):
 
-    loss = 0
-
-    assert len(enumerate(outputs)) == 1, "bad number of outputs"
-    print(output_loss_weight)
-
+    assert len(list(enumerate(outputs))) == 1, "bad number of outputs"
+    
+    losses = []
     for oi, o in enumerate(outputs):
-        if o == 'unoriented_normals' or o == 'oriented_normals':
+        if o == 'oriented_normals':
             o_pred = pred[:, output_pred_ind[oi]:output_pred_ind[oi]+3]
             o_target = target[output_target_ind[oi]]
 
@@ -287,37 +237,22 @@ def compute_loss(pred, target, outputs, output_pred_ind, output_target_ind, outp
                 # since we know the transform to be a rotation (QSTN), the transpose is the inverse
                 o_pred = torch.bmm(o_pred.unsqueeze(1), patch_rot.transpose(2, 1)).squeeze(1)
 
-            if o == 'unoriented_normals':
-                if normal_loss == 'ms_euclidean':
-                    loss += torch.min((o_pred-o_target).pow(2).sum(1), (o_pred+o_target).pow(2).sum(1)).mean() * output_loss_weight[oi]
-                elif normal_loss == 'ms_oneminuscos':
-                    return (1-torch.abs(utils.cos_angle(o_pred, o_target))).pow(2) * output_loss_weight[oi]
-                else:
-                    raise ValueError('Unsupported loss type: %s' % (normal_loss))
-            elif o == 'oriented_normals':
-                if normal_loss == 'ms_euclidean':
-                    loss += (o_pred-o_target).pow(2).sum(1).mean() * output_loss_weight[oi]
-                elif normal_loss == 'ms_oneminuscos':
-                    loss += (1-utils.cos_angle(o_pred, o_target)).pow(2).mean() * output_loss_weight[oi]
-                else:
-                    raise ValueError('Unsupported loss type: %s' % (normal_loss))
+            if normal_loss == 'ms_euclidean':
+                assert False, "ms_euclidean"
+                l = (o_pred-o_target).pow(2).sum(1) * output_loss_weight[oi]
+                losses.append(l)
+            elif normal_loss == 'ms_oneminuscos':
+                l = (1-utils.cos_angle(o_pred, o_target)).pow(2) * output_loss_weight[oi]
+                losses.append(l)
             else:
                 raise ValueError('Unsupported output type: %s' % (o))
-
-        elif o == 'max_curvature' or o == 'min_curvature':
-            o_pred = pred[:, output_pred_ind[oi]:output_pred_ind[oi]+1]
-            o_target = target[output_target_ind[oi]]
-
-            # Rectified mse loss: mean square of (pred - gt) / max(1, |gt|)
-            normalized_diff = (o_pred - o_target) / torch.clamp(torch.abs(o_target), min=1)
-            loss += normalized_diff.pow(2).mean() * output_loss_weight[oi]
-
         else:
             raise ValueError('Unsupported output type: %s' % (o))
 
-    return loss
+    return losses
 
 
 if __name__ == '__main__':
     train_opt = parse_arguments()
     eval_pcpnet(train_opt)
+    
