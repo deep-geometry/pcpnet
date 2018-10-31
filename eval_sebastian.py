@@ -95,8 +95,7 @@ def eval_pcpnet(opt):
         assert False, "Sebastian only supports patch_radius size 1"
 
     if os.path.exists(model_filename):
-        pcpnet.load_state_dict(torch.load(model_filename,
-                                          map_location={'cuda:1': 'cuda:0', 'cuda:2': 'cuda:0', 'cuda:3': 'cuda:0'}))
+        pcpnet.load_state_dict(torch.load(model_filename))
     else:
         raise ValueError("No model to load")
 

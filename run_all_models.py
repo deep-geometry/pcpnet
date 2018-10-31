@@ -4,6 +4,8 @@ import subprocess
 
 for fname in os.listdir(sys.argv[1]):
     if fname.endswith(".pth"):
+        if fname.endswith("params.pth"):
+            continue
         tokens = fname.split("_")
         assert tokens[1] == "patch"
         dataset_name = tokens[0]
