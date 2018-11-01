@@ -8,7 +8,7 @@ for fname in os.listdir(sys.argv[1]):
             continue
         tokens = fname.split("_")
         assert tokens[1] == "patch"
-        dataset_name = tokens[0]
+        dataset_name = tokens[0] + "_patch"
         num_pts = tokens[2]
         model_path = os.path.join(sys.argv[1], fname)
         data_path = os.path.join("./pclouds", dataset_name, "test", num_pts)
